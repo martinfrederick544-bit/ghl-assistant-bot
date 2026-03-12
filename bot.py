@@ -24,107 +24,62 @@ GHL_HEADERS = {
 
 # ── GHL helpers ──────────────────────────────────────────────────────────────
 
-def ghl_create_subaccount(name: str, email: str = "", phone: str = "") -> dict:
+def ghl_create_subaccount(name, email="", phone=""):
     payload = {
-        "name": name,
-        "phone": phone,
-        "email": email,
-        "address": "",
-        "city": "",
-        "state": "",
-        "country": "CA",
-        "postalCode": "",
-        "timezone": "America/Toronto",
+        "name": name, "phone": phone, "email": email,
+        "address": "", "city": "", "state": "", "country": "CA",
+        "postalCode": "", "timezone": "America/Toronto",
         "prospectInfo": {"email": email, "phone": phone, "name": name},
     }
     r = requests.post(f"{GHL_BASE}/locations/", headers=GHL_HEADERS, json=payload)
+    logger.info(f"GHL create_subaccount status={r.status_code} body={r.text[:300]}")
     return r.json()
 
-
-def ghl_create_contact(first: str, last: str = "", email: str = "", phone: str = "",
-                       company: str = "", notes: str = "") -> dict:
+def ghl_create_contact(first, last="", email="", phone="", company="", notes=""):
     payload = {
         "locationId": GHL_LOCATION_ID,
-        "firstName": first,
-        "lastName": last,
-        "email": email,
-        "phone": phone,
-        "companyName": company,
+        "firstName": first, "lastName": last,
+        "email": email, "phone": phone, "companyName": company,
     }
     r = requests.post(f"{GHL_BASE}/contacts/", headers=GHL_HEADERS, json=payload)
+    logger.info(f"GHL create_contact status={r.status_code} body={r.text[:300]}")
     data = r.json()
     if notes and data.get("contact", {}).get("id"):
         ghl_add_note(data["contact"]["id"], notes)
     return data
 
-
-def ghl_search_contact(name: str) -> dict:
-    r = requests.get(
-        f"{GHL_BASE}/contacts/search",
-        headers=GHL_HEADERS,
-        params={"locationId": GHL_LOCATION_ID, "query": name}
-    )
+def ghl_search_contact(name):
+    r = requests.get(f"{GHL_BASE}/contacts/search", headers=GHL_HEADERS,
+                     params={"locationId": GHL_LOCATION_ID, "query": name})
+    logger.info(f"GHL search_contact status={r.status_code} body={r.text[:300]}")
     return r.json()
 
-
-def ghl_add_note(contact_id: str, note: str) -> dict:
+def ghl_add_note(contact_id, note):
     payload = {"body": note, "userId": ""}
     r = requests.post(f"{GHL_BASE}/contacts/{contact_id}/notes", headers=GHL_HEADERS, json=payload)
+    logger.info(f"GHL add_note status={r.status_code} body={r.text[:300]}")
     return r.json()
 
-
-def ghl_update_contact(contact_id: str, fields: dict) -> dict:
+def ghl_update_contact(contact_id, fields):
     r = requests.put(f"{GHL_BASE}/contacts/{contact_id}", headers=GHL_HEADERS, json=fields)
+    logger.info(f"GHL update_contact status={r.status_code} body={r.text[:300]}")
     return r.json()
 
-
-def ghl_create_pipeline(name: str, stages: list) -> dict:
+def ghl_create_pipeline(name, stages):
     payload = {
         "name": name,
         "locationId": GHL_LOCATION_ID,
         "stages": [{"name": s} for s in stages]
     }
     r = requests.post(f"{GHL_BASE}/opportunities/pipelines", headers=GHL_HEADERS, json=payload)
+    logger.info(f"GHL create_pipeline status={r.status_code} body={r.text[:300]}")
     return r.json()
 
-
-def ghl_create_opportunity(contact_id: str, pipeline_id: str, stage_id: str,
-                            title: str, value: float = 0) -> dict:
-    payload = {
-        "locationId": GHL_LOCATION_ID,
-        "pipelineId": pipeline_id,
-        "stageId": stage_id,
-        "contactId": contact_id,
-        "name": title,
-        "monetaryValue": value,
-        "status": "open"
-    }
-    r = requests.post(f"{GHL_BASE}/opportunities/", headers=GHL_HEADERS, json=payload)
+def ghl_get_pipelines():
+    r = requests.get(f"{GHL_BASE}/opportunities/pipelines", headers=GHL_HEADERS,
+                     params={"locationId": GHL_LOCATION_ID})
+    logger.info(f"GHL get_pipelines status={r.status_code} body={r.text[:300]}")
     return r.json()
-
-
-def ghl_get_pipelines() -> dict:
-    r = requests.get(
-        f"{GHL_BASE}/opportunities/pipelines",
-        headers=GHL_HEADERS,
-        params={"locationId": GHL_LOCATION_ID}
-    )
-    return r.json()
-
-
-def ghl_book_appointment(contact_id: str, calendar_id: str,
-                          start_time: str, end_time: str, title: str = "Rendez-vous") -> dict:
-    payload = {
-        "calendarId": calendar_id,
-        "locationId": GHL_LOCATION_ID,
-        "contactId": contact_id,
-        "startTime": start_time,
-        "endTime": end_time,
-        "title": title,
-    }
-    r = requests.post(f"{GHL_BASE}/calendars/events/appointments", headers=GHL_HEADERS, json=payload)
-    return r.json()
-
 
 # ── Claude ───────────────────────────────────────────────────────────────────
 
@@ -146,7 +101,7 @@ Actions disponibles:
   params: first (obligatoire), last, email, phone, company, notes
 - search_contact: chercher un contact existant
   params: name (obligatoire)
-- add_note: ajouter une note à un contact (cherche d'abord le contact par nom)
+- add_note: ajouter une note à un contact
   params: contact_name (obligatoire), note (obligatoire)
 - update_contact: modifier un contact existant
   params: contact_name (obligatoire), fields (dict avec les champs à modifier)
@@ -156,19 +111,17 @@ Actions disponibles:
   params: {}
 - unknown: si tu ne comprends pas la commande
   params: {}
-  confirmation: demande de clarification
 
-Exemples de commandes et réponses:
-- "Nouveau client Construction Tremblay" → create_subaccount {name: "Construction Tremblay"}
-- "Ajoute Jean Tremblay entrepreneur 514-555-0101" → create_contact {first: "Jean", last: "Tremblay", phone: "514-555-0101", company: "Entrepreneur"}
-- "Note pour Jean Tremblay: rappel vendredi pour soumission" → add_note {contact_name: "Jean Tremblay", note: "Rappel vendredi pour soumission"}
-- "Crée un pipeline Construction avec Prospect, Soumission, Contrat signé, En cours, Complété" → create_pipeline {name: "Construction", stages: ["Prospect", "Soumission", "Contrat signé", "En cours", "Complété"]}
+Exemples:
+- "Nouveau client Construction Tremblay" → {"action":"create_subaccount","params":{"name":"Construction Tremblay"},"confirmation":"Je crée le sub-account Construction Tremblay..."}
+- "Ajoute Jean Tremblay 514-555-0101" → {"action":"create_contact","params":{"first":"Jean","last":"Tremblay","phone":"514-555-0101"},"confirmation":"Je crée le contact Jean Tremblay..."}
+- "Note pour Jean Tremblay: rappel vendredi" → {"action":"add_note","params":{"contact_name":"Jean Tremblay","note":"Rappel vendredi"},"confirmation":"J'ajoute la note à Jean Tremblay..."}
+- "Crée pipeline Construction: Prospect, Soumission, Contrat" → {"action":"create_pipeline","params":{"name":"Construction","stages":["Prospect","Soumission","Contrat"]},"confirmation":"Je crée le pipeline..."}
 
-Interprète le langage naturel québécois de façon flexible. "Fait une note" = add_note, "nouveau client" = create_subaccount, etc.
-Réponds UNIQUEMENT en JSON, rien d'autre."""
+Réponds UNIQUEMENT en JSON valide, rien d'autre, pas de markdown."""
 
 
-def ask_claude(text: str) -> dict:
+def ask_claude(text):
     payload = {
         "model": "claude-sonnet-4-6",
         "max_tokens": 1000,
@@ -184,18 +137,25 @@ def ask_claude(text: str) -> dict:
         },
         json=payload
     )
-    raw = r.json()["content"][0]["text"]
-    # Strip markdown fences if present
+    logger.info(f"Anthropic status={r.status_code} body={r.text[:500]}")
+
+    if r.status_code != 200:
+        resp = r.json()
+        raise Exception(f"Anthropic erreur {r.status_code}: {resp.get('error', {}).get('message', str(resp))}")
+
+    resp = r.json()
+    if "content" not in resp:
+        raise Exception(f"Réponse inattendue Anthropic: {json.dumps(resp)[:300]}")
+
+    raw = resp["content"][0]["text"]
     raw = re.sub(r"```json\s*|\s*```", "", raw).strip()
     return json.loads(raw)
 
 
-def transcribe_audio(file_path: str) -> str:
-    """Transcribe audio using OpenAI Whisper API — or fallback to a simple message."""
-    # We use the Whisper endpoint via requests
+def transcribe_audio(file_path):
     openai_key = os.environ.get("OPENAI_API_KEY", "")
     if not openai_key:
-        return "[transcription non disponible — ajoute une clé OPENAI_API_KEY pour les vocaux]"
+        return ""
     with open(file_path, "rb") as f:
         r = requests.post(
             "https://api.openai.com/v1/audio/transcriptions",
@@ -208,33 +168,26 @@ def transcribe_audio(file_path: str) -> str:
 
 # ── Action executor ───────────────────────────────────────────────────────────
 
-def execute_action(action: str, params: dict) -> str:
+def execute_action(action, params):
     try:
         if action == "create_subaccount":
-            result = ghl_create_subaccount(
-                params.get("name", ""),
-                params.get("email", ""),
-                params.get("phone", "")
-            )
-            if result.get("id") or result.get("location"):
+            result = ghl_create_subaccount(params.get("name",""), params.get("email",""), params.get("phone",""))
+            loc = result.get("location") or result.get("id")
+            if loc:
                 return "✅ Sub-account créé avec succès dans GHL!"
-            return f"⚠️ Réponse GHL: {json.dumps(result)[:200]}"
+            return f"⚠️ Réponse GHL: {json.dumps(result)[:300]}"
 
         elif action == "create_contact":
-            result = ghl_create_contact(
-                params.get("first", ""),
-                params.get("last", ""),
-                params.get("email", ""),
-                params.get("phone", ""),
-                params.get("company", ""),
-                params.get("notes", "")
-            )
-            if result.get("contact"):
-                return f"✅ Contact créé: {result['contact'].get('firstName', '')} {result['contact'].get('lastName', '')}"
-            return f"⚠️ Réponse GHL: {json.dumps(result)[:200]}"
+            result = ghl_create_contact(params.get("first",""), params.get("last",""),
+                                        params.get("email",""), params.get("phone",""),
+                                        params.get("company",""), params.get("notes",""))
+            c = result.get("contact")
+            if c:
+                return f"✅ Contact créé: {c.get('firstName','')} {c.get('lastName','')}"
+            return f"⚠️ Réponse GHL: {json.dumps(result)[:300]}"
 
         elif action == "search_contact":
-            result = ghl_search_contact(params.get("name", ""))
+            result = ghl_search_contact(params.get("name",""))
             contacts = result.get("contacts", [])
             if not contacts:
                 return f"🔍 Aucun contact trouvé pour: {params.get('name')}"
@@ -244,17 +197,17 @@ def execute_action(action: str, params: dict) -> str:
             return "\n".join(lines)
 
         elif action == "add_note":
-            search = ghl_search_contact(params.get("contact_name", ""))
+            search = ghl_search_contact(params.get("contact_name",""))
             contacts = search.get("contacts", [])
             if not contacts:
                 return f"❌ Contact introuvable: {params.get('contact_name')}"
             contact_id = contacts[0]["id"]
             name = f"{contacts[0].get('firstName','')} {contacts[0].get('lastName','')}".strip()
-            ghl_add_note(contact_id, params.get("note", ""))
+            ghl_add_note(contact_id, params.get("note",""))
             return f"✅ Note ajoutée à {name}"
 
         elif action == "update_contact":
-            search = ghl_search_contact(params.get("contact_name", ""))
+            search = ghl_search_contact(params.get("contact_name",""))
             contacts = search.get("contacts", [])
             if not contacts:
                 return f"❌ Contact introuvable: {params.get('contact_name')}"
@@ -264,14 +217,11 @@ def execute_action(action: str, params: dict) -> str:
             return f"✅ Contact {name} mis à jour"
 
         elif action == "create_pipeline":
-            result = ghl_create_pipeline(
-                params.get("name", ""),
-                params.get("stages", [])
-            )
+            result = ghl_create_pipeline(params.get("name",""), params.get("stages",[]))
             if result.get("pipeline") or result.get("id"):
-                stages = params.get("stages", [])
+                stages = params.get("stages",[])
                 return f"✅ Pipeline '{params.get('name')}' créé avec {len(stages)} étapes: {', '.join(stages)}"
-            return f"⚠️ Réponse GHL: {json.dumps(result)[:200]}"
+            return f"⚠️ Réponse GHL: {json.dumps(result)[:300]}"
 
         elif action == "get_pipelines":
             result = ghl_get_pipelines()
@@ -280,17 +230,17 @@ def execute_action(action: str, params: dict) -> str:
                 return "📋 Aucun pipeline trouvé"
             lines = [f"📋 {len(pipelines)} pipeline(s):"]
             for p in pipelines:
-                stages = p.get("stages", [])
-                lines.append(f"  • {p.get('name','')} ({len(stages)} étapes)")
+                lines.append(f"  • {p.get('name','')} ({len(p.get('stages',[]))} étapes)")
             return "\n".join(lines)
 
         elif action == "unknown":
-            return "❓ Je n'ai pas compris ta commande. Peux-tu reformuler?"
+            return "❓ Je n'ai pas compris. Peux-tu reformuler?"
 
         else:
             return f"❓ Action inconnue: {action}"
 
     except Exception as e:
+        logger.error(f"execute_action error: {e}")
         return f"❌ Erreur: {str(e)}"
 
 
@@ -298,6 +248,8 @@ def execute_action(action: str, params: dict) -> str:
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
+    if text.startswith("/"):
+        return
     await update.message.reply_text("⏳ Je traite ta commande...")
     try:
         parsed = ask_claude(text)
@@ -307,6 +259,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = execute_action(action, params)
         await update.message.reply_text(f"{confirmation}\n\n{result}")
     except Exception as e:
+        logger.error(f"handle_text error: {e}")
         await update.message.reply_text(f"❌ Erreur: {str(e)}")
 
 
@@ -318,15 +271,14 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
             await file.download_to_drive(tmp.name)
             text = transcribe_audio(tmp.name)
-
-        if not text or text.startswith("[transcription"):
+        if not text:
             await update.message.reply_text(
                 "⚠️ Transcription vocale non disponible.\n"
                 "Envoie ta commande en texte pour l'instant.\n\n"
-                "_Pour activer les vocaux, ajoute une clé OpenAI dans Railway._"
+                "_Pour activer les vocaux: ajoute OPENAI\\_API\\_KEY dans Railway._",
+                parse_mode="Markdown"
             )
             return
-
         await update.message.reply_text(f"📝 Compris: _{text}_", parse_mode="Markdown")
         parsed = ask_claude(text)
         action = parsed.get("action", "unknown")
@@ -334,23 +286,23 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         confirmation = parsed.get("confirmation", "")
         result = execute_action(action, params)
         await update.message.reply_text(f"{confirmation}\n\n{result}")
-
     except Exception as e:
+        logger.error(f"handle_voice error: {e}")
         await update.message.reply_text(f"❌ Erreur vocal: {str(e)}")
 
 
 async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "👋 *Bonjour! Je suis ton assistant GHL.*\n\n"
-        "Envoie-moi une commande en français naturel, par exemple:\n\n"
+        "👋 *Bonjour\\! Je suis ton assistant GHL\\.*\n\n"
+        "Envoie\\-moi une commande en français naturel, par exemple:\n\n"
         "• _Nouveau client Construction Tremblay_\n"
-        "• _Ajoute Jean Dupont entrepreneur 514-555-0101_\n"
+        "• _Ajoute Jean Dupont entrepreneur 514\\-555\\-0101_\n"
         "• _Note pour Jean Dupont: rappel vendredi soumission_\n"
-        "• _Crée un pipeline Construction avec Prospect, Soumission, Contrat_\n"
-        "• _Montre-moi mes pipelines_\n\n"
-        "Tu peux aussi envoyer un 🎤 message vocal!"
+        "• _Crée pipeline Construction: Prospect, Soumission, Contrat_\n"
+        "• _Montre mes pipelines_\n\n"
+        "Tu peux aussi envoyer un 🎤 message vocal\\!"
     )
-    await update.message.reply_text(msg, parse_mode="Markdown")
+    await update.message.reply_text(msg, parse_mode="MarkdownV2")
 
 
 def main():
