@@ -86,6 +86,32 @@ def ghl_get_pipelines():
     logger.info(f"GHL get_pipelines status={r.status_code} body={r.text[:300]}")
     return r.json()
 
+def ghl_find_pipeline_by_name(pipeline_name):
+    data = ghl_get_pipelines()
+    pipelines = data.get("pipelines", [])
+    name_lower = pipeline_name.lower()
+    for p in pipelines:
+        if p.get("name", "").lower() == name_lower:
+            return p
+    for p in pipelines:
+        if name_lower in p.get("name", "").lower():
+            return p
+    return None
+
+def ghl_add_lead_to_pipeline(contact_id, pipeline_id, stage_id="", title="", status="open"):
+    payload = {
+        "locationId": GHL_LOCATION_ID,
+        "pipelineId": pipeline_id,
+        "contactId": contact_id,
+        "name": title or "Nouveau lead",
+        "status": status,
+    }
+    if stage_id:
+        payload["pipelineStageId"] = stage_id
+    r = requests.post(f"{GHL_BASE}/opportunities/", headers=GHL_HEADERS, json=payload)
+    logger.info(f"GHL add_lead_to_pipeline status={r.status_code} body={r.text[:300]}")
+    return r.json()
+
 # ── OpenAI : transcription vocale + GPT ──────────────────────────────────────
 
 def transcribe_audio(file_path):
@@ -126,6 +152,10 @@ Actions disponibles:
   params: name (obligatoire), stages [] (liste d'étapes)
 - get_pipelines: lister les pipelines existants
   params: {}
+- add_to_pipeline: ajouter un lead (contact existant ou nouveau) dans un pipeline
+  params: contact_name (obligatoire), pipeline_name (obligatoire), stage_name (optionnel), title (optionnel), first, last, email, phone, company
+- add_leads_to_pipeline: ajouter une liste de leads dans un pipeline
+  params: pipeline_name (obligatoire), stage_name (optionnel), leads [] (liste d'objets avec first, last, email, phone, company, title)
 - unknown: commande incomprise
   params: {}
 
@@ -134,6 +164,8 @@ Exemples:
 "Ajoute Jean Tremblay entrepreneur 514-555-0101" → {"action":"create_contact","params":{"first":"Jean","last":"Tremblay","phone":"514-555-0101","company":"Entrepreneur"},"confirmation":"Je crée le contact Jean Tremblay..."}
 "Note pour Jean Tremblay: rappel vendredi soumission Laval" → {"action":"add_note","params":{"contact_name":"Jean Tremblay","note":"Rappel vendredi pour soumission Laval"},"confirmation":"J'ajoute la note à Jean Tremblay..."}
 "Crée pipeline Construction: Prospect, Soumission, Contrat signé, En cours, Complété" → {"action":"create_pipeline","params":{"name":"Construction","stages":["Prospect","Soumission","Contrat signé","En cours","Complété"]},"confirmation":"Je crée le pipeline Construction..."}
+"Ajoute Jean Dupont au pipeline Ventes" → {"action":"add_to_pipeline","params":{"contact_name":"Jean Dupont","pipeline_name":"Ventes"},"confirmation":"J'ajoute Jean Dupont dans le pipeline Ventes..."}
+"Ajoute ces leads au pipeline Prospects: Jean Tremblay 514-111-0101, Marie Côté marie@example.com" → {"action":"add_leads_to_pipeline","params":{"pipeline_name":"Prospects","leads":[{"first":"Jean","last":"Tremblay","phone":"514-111-0101"},{"first":"Marie","last":"Côté","email":"marie@example.com"}]},"confirmation":"J'ajoute 2 leads dans le pipeline Prospects..."}
 
 Réponds UNIQUEMENT en JSON valide. Jamais de markdown, jamais de texte avant ou après."""
 
@@ -233,6 +265,101 @@ def execute_action(action, params):
                 lines.append(f"  • {p.get('name','')} ({len(p.get('stages',[]))} étapes)")
             return "\n".join(lines)
 
+        elif action == "add_to_pipeline":
+            pipeline_name = params.get("pipeline_name", "")
+            pipeline = ghl_find_pipeline_by_name(pipeline_name)
+            if not pipeline:
+                return f"❌ Pipeline introuvable: {pipeline_name}. Utilise 'Montre mes pipelines' pour voir la liste."
+
+            stage_id = ""
+            stage_name = params.get("stage_name", "")
+            if stage_name:
+                for s in pipeline.get("stages", []):
+                    if stage_name.lower() in s.get("name", "").lower():
+                        stage_id = s.get("id", "")
+                        break
+
+            contact_name = params.get("contact_name", "")
+            search = ghl_search_contact(contact_name)
+            contacts = search.get("contacts", [])
+            if contacts:
+                contact_id = contacts[0]["id"]
+                name = f"{contacts[0].get('firstName','')} {contacts[0].get('lastName','')}".strip()
+            else:
+                parts = contact_name.split()
+                created = ghl_create_contact(
+                    parts[0] if parts else contact_name,
+                    " ".join(parts[1:]) if len(parts) > 1 else "",
+                    params.get("email", ""), params.get("phone", ""),
+                    params.get("company", "")
+                )
+                c = created.get("contact", {})
+                if not c or not c.get("id"):
+                    return f"❌ Impossible de créer/trouver le contact: {contact_name}"
+                contact_id = c["id"]
+                name = f"{c.get('firstName','')} {c.get('lastName','')}".strip()
+
+            title = params.get("title", "") or name
+            result = ghl_add_lead_to_pipeline(contact_id, pipeline["id"], stage_id, title)
+            if result.get("opportunity") or result.get("id"):
+                stage_info = f" (étape: {stage_name})" if stage_name else ""
+                return f"✅ {name} ajouté au pipeline '{pipeline.get('name')}'{stage_info}"
+            return f"⚠️ Réponse GHL: {json.dumps(result)[:300]}"
+
+        elif action == "add_leads_to_pipeline":
+            pipeline_name = params.get("pipeline_name", "")
+            pipeline = ghl_find_pipeline_by_name(pipeline_name)
+            if not pipeline:
+                return f"❌ Pipeline introuvable: {pipeline_name}. Utilise 'Montre mes pipelines' pour voir la liste."
+
+            stage_id = ""
+            stage_name = params.get("stage_name", "")
+            if stage_name:
+                for s in pipeline.get("stages", []):
+                    if stage_name.lower() in s.get("name", "").lower():
+                        stage_id = s.get("id", "")
+                        break
+
+            leads = params.get("leads", [])
+            if not leads:
+                return "❌ Aucun lead fourni dans la liste."
+
+            success, errors = [], []
+            for lead in leads:
+                try:
+                    contact_name = f"{lead.get('first','')} {lead.get('last','')}".strip()
+                    search = ghl_search_contact(contact_name)
+                    existing = search.get("contacts", [])
+                    if existing:
+                        contact_id = existing[0]["id"]
+                    else:
+                        created = ghl_create_contact(
+                            lead.get("first", ""), lead.get("last", ""),
+                            lead.get("email", ""), lead.get("phone", ""),
+                            lead.get("company", "")
+                        )
+                        c = created.get("contact", {})
+                        if not c or not c.get("id"):
+                            errors.append(contact_name)
+                            continue
+                        contact_id = c["id"]
+
+                    title = lead.get("title", "") or contact_name
+                    result = ghl_add_lead_to_pipeline(contact_id, pipeline["id"], stage_id, title)
+                    if result.get("opportunity") or result.get("id"):
+                        success.append(contact_name)
+                    else:
+                        errors.append(contact_name)
+                except Exception as e:
+                    errors.append(f"{lead.get('first','')} {lead.get('last','')} ({e})")
+
+            lines = [f"📋 Pipeline '{pipeline.get('name')}' — résultat:"]
+            if success:
+                lines.append(f"✅ {len(success)} lead(s) ajouté(s): {', '.join(success)}")
+            if errors:
+                lines.append(f"❌ {len(errors)} échec(s): {', '.join(errors)}")
+            return "\n".join(lines)
+
         elif action == "unknown":
             return "❓ Je n'ai pas compris. Peux-tu reformuler?"
 
@@ -294,7 +421,9 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• _Ajoute Jean Dupont 514-555-0101_\n"
         "• _Note pour Jean Dupont: rappel vendredi soumission_\n"
         "• _Crée pipeline Construction: Prospect, Soumission, Contrat_\n"
-        "• _Montre mes pipelines_"
+        "• _Montre mes pipelines_\n"
+        "• _Ajoute Jean Tremblay au pipeline Ventes_\n"
+        "• _Ajoute ces leads au pipeline Prospects: Jean Dupont 514-111-0101, Marie Côté marie@test.com_"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
